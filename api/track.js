@@ -8,65 +8,37 @@ const supabase = createClient(
 export default async function handler(req, res) {
   const { id } = req.query;
 
-  // 1. מחזירים מיד תמונה שקופה לדפדפן (כדי לא לעכב)
-  // משתמשים בקידוד base64 של גיף שקוף 1x1
-  const pixel = Buffer.from(
-    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-    'base64'
-  );
-  
-  res.setHeader('Content-Type', 'image/gif');
-  // מניעת שמירה בזיכרון (Cache) - חובה!
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-  res.status(200).send(pixel);
+  if (!id) {
+      return res.status(400).send("Error: No ID provided");
+  }
 
-  if (!id) return;
-
-  // 2. עדכון המסד נתונים ברקע
+  // ניסיון ישיר לעדכן
   try {
-    // אנחנו שולפים את המידע הנוכחי
-    const { data: currentRecord, error: fetchError } = await supabase
-      .from('email_tracking')
-      .select('open_count, opens_details')
-      .eq('tracking_id', id)
-      .single();
+      // שלב א: נראה אם הרשומה קיימת בכלל
+      const { data, error: findError } = await supabase
+        .from('email_tracking')
+        .select('*')
+        .eq('tracking_id', id)
+        .single();
 
-    if (fetchError || !currentRecord) {
-      console.error("Error fetching record:", fetchError);
-      return;
-    }
+      if (findError) {
+          return res.status(500).send("Error Finding: " + JSON.stringify(findError));
+      }
 
-    // מכינים את רשומת האירוע החדשה
-    const newEvent = {
-      at: new Date().toISOString(),
-      ua: req.headers['user-agent'] || 'unknown',
-      ip: req.headers['x-forwarded-for'] || 'unknown'
-    };
+      // שלב ב: ננסה לעדכן
+      const { error: updateError } = await supabase
+        .from('email_tracking')
+        .update({ open_count: (data.open_count || 0) + 1 })
+        .eq('tracking_id', id);
 
-    // מוסיפים לרשימה הקיימת (או יוצרים חדשה אם ריקה)
-    const currentDetails = Array.isArray(currentRecord.opens_details) 
-        ? currentRecord.opens_details 
-        : [];
-        
-    currentDetails.push(newEvent);
+      if (updateError) {
+          return res.status(500).send("Error Updating: " + JSON.stringify(updateError));
+      }
 
-    // מעדכנים את הרשומה
-    const { error: updateError } = await supabase
-      .from('email_tracking')
-      .update({
-        open_count: (currentRecord.open_count || 0) + 1,
-        last_opened_at: new Date().toISOString(),
-        opens_details: currentDetails
-      })
-      .eq('tracking_id', id);
+      // אם הגענו לפה - הכל עבד!
+      return res.status(200).send("SUCCESS! Count updated. Go check the table.");
 
-    if (updateError) {
-      console.error("Error updating record:", updateError);
-    } else {
-      console.log("Success! Updated tracking for:", id);
-    }
-
-  } catch (error) {
-    console.error("Critical error in track.js:", error);
+  } catch (err) {
+      return res.status(500).send("System Error: " + err.message);
   }
 }
