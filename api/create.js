@@ -5,37 +5,59 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// פיקסל שקוף 1x1
+const transparentPixel = Buffer.from(
+  'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+  'base64'
+);
+
 export default async function handler(req, res) {
-  // אישורי כניסה (CORS) - חובה!
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
+  const { id } = req.query;
 
-  // אם הדפדפן רק שואל "אפשר להיכנס?", אנחנו עונים "כן" מיד
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // מכאן והלאה הלוגיקה הרגילה
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { tracking_id, subject } = req.body;
+  // הגדרת כותרות (Headers) חשובות
+  res.setHeader('Content-Type', 'image/gif');
+  // פקודות למניעת שמירה בזיכרון (Cache) - קריטי לג'ימייל!
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
 
   try {
-    const { error } = await supabase
-      .from('email_tracking')
-      .insert([{ tracking_id, subject }]);
+    // 1. קודם כל ננסה לעדכן את מסד הנתונים
+    if (id) {
+      // שליפת הרשומה הנוכחית
+      const { data: current, error: fetchError } = await supabase
+        .from('email_tracking')
+        .select('open_count, opens_details')
+        .eq('tracking_id', id)
+        .single();
 
-    if (error) throw error;
+      if (!fetchError && current) {
+        // הוספת מידע חדש
+        const newEvent = {
+          at: new Date().toISOString(),
+          ua: req.headers['user-agent'] || 'unknown',
+          ip: req.headers['x-forwarded-for'] || 'unknown'
+        };
 
-    return res.status(200).json({ success: true });
+        const newDetails = current.opens_details || [];
+        newDetails.push(newEvent);
+
+        // שמירה חזרה בטבלה
+        await supabase
+          .from('email_tracking')
+          .update({
+            open_count: (current.open_count || 0) + 1,
+            last_opened_at: new Date().toISOString(),
+            opens_details: newDetails
+          })
+          .eq('tracking_id', id);
+      }
+    }
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    // אם הייתה שגיאה במסד הנתונים - נדפיס אותה ללוג, אבל לא נשבור את התמונה
+    console.error('Track error:', error);
+  } finally {
+    // 2. בסוף, תמיד נחזיר את התמונה, גם אם העדכון הצליח וגם אם נכשל
+    res.status(200).send(transparentPixel);
   }
 }
