@@ -8,37 +8,42 @@ const supabase = createClient(
 export default async function handler(req, res) {
   const { id } = req.query;
 
-  if (!id) {
-      return res.status(400).send("Error: No ID provided");
-  }
+  // 1. קודם כל ולפני הכל: מחזירים תמונה שקופה לדפדפן
+  // זה חייב לקרות מהר כדי שהמייל ייטען חלק
+  const pixel = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64'
+  );
+  
+  res.setHeader('Content-Type', 'image/gif');
+  // פקודות למניעת שמירה בזיכרון (Cache) - קריטי!
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.status(200).send(pixel);
 
-  // ניסיון ישיר לעדכן
-  try {
-      // שלב א: נראה אם הרשומה קיימת בכלל
-      const { data, error: findError } = await supabase
+  // 2. רק אם יש מזהה, ממשיכים לעדכן את הטבלה ברקע
+  if (id) {
+    try {
+      // שלב א: משיכת הנתונים הקיימים
+      const { data: current, error: findError } = await supabase
         .from('email_tracking')
-        .select('*')
+        .select('open_count')
         .eq('tracking_id', id)
         .single();
 
-      if (findError) {
-          return res.status(500).send("Error Finding: " + JSON.stringify(findError));
+      if (!findError && current) {
+        // שלב ב: עדכון המספר + זמן הפתיחה
+        await supabase
+          .from('email_tracking')
+          .update({ 
+            open_count: (current.open_count || 0) + 1,
+            last_opened_at: new Date().toISOString()
+          })
+          .eq('tracking_id', id);
       }
-
-      // שלב ב: ננסה לעדכן
-      const { error: updateError } = await supabase
-        .from('email_tracking')
-        .update({ open_count: (data.open_count || 0) + 1 })
-        .eq('tracking_id', id);
-
-      if (updateError) {
-          return res.status(500).send("Error Updating: " + JSON.stringify(updateError));
-      }
-
-      // אם הגענו לפה - הכל עבד!
-      return res.status(200).send("SUCCESS! Count updated. Go check the table.");
-
-  } catch (err) {
-      return res.status(500).send("System Error: " + err.message);
+    } catch (err) {
+      // אנחנו מתעלמים משגיאות כאן כדי לא להפיל את השרת, 
+      // כי התמונה כבר נשלחה למשתמש.
+      console.error("Track Error:", err);
+    }
   }
 }
