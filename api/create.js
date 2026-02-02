@@ -1,63 +1,66 @@
 import { createClient } from '@supabase/supabase-js';
 
+// יצירת הקליינט
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
 
-// פיקסל שקוף 1x1
-const transparentPixel = Buffer.from(
-  'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-  'base64'
-);
-
 export default async function handler(req, res) {
-  const { id } = req.query;
+  // וידוא שהבקשה היא לא סתם דפדפן שמנסה להוריד אייקון
+  // למרות שזה לא קריטי לבדיקה שלנו, זה טוב לסדר הטוב
+  
+  const { id, subject } = req.query;
 
-  // הגדרת כותרות (Headers) חשובות
-  res.setHeader('Content-Type', 'image/gif');
-  // פקודות למניעת שמירה בזיכרון (Cache) - קריטי לג'ימייל!
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  // בדיקה אם המשתנים בכלל נטענו
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+    return res.status(500).json({ 
+      error: "Missing Environment Variables", 
+      details: "SUPABASE_URL or KEY is undefined on server" 
+    });
+  }
+
+  if (!id) {
+    return res.status(400).json({ error: "Missing 'id' parameter" });
+  }
 
   try {
-    // 1. קודם כל ננסה לעדכן את מסד הנתונים
-    if (id) {
-      // שליפת הרשומה הנוכחית
-      const { data: current, error: fetchError } = await supabase
-        .from('email_tracking')
-        .select('open_count, opens_details')
-        .eq('tracking_id', id)
-        .single();
+    // נסיון כתיבה לטבלה
+    const { data, error } = await supabase
+      .from('email_tracking')
+      .insert([
+        { 
+          tracking_id: id, 
+          subject: subject || 'No Subject',
+          open_count: 0 
+        }
+      ])
+      .select();
 
-      if (!fetchError && current) {
-        // הוספת מידע חדש
-        const newEvent = {
-          at: new Date().toISOString(),
-          ua: req.headers['user-agent'] || 'unknown',
-          ip: req.headers['x-forwarded-for'] || 'unknown'
-        };
-
-        const newDetails = current.opens_details || [];
-        newDetails.push(newEvent);
-
-        // שמירה חזרה בטבלה
-        await supabase
-          .from('email_tracking')
-          .update({
-            open_count: (current.open_count || 0) + 1,
-            last_opened_at: new Date().toISOString(),
-            opens_details: newDetails
-          })
-          .eq('tracking_id', id);
-      }
+    if (error) {
+      // אם יש שגיאה מ-Supabase, נציג אותה
+      console.error("Supabase Error:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: error.message,
+        code: error.code,
+        details: error.details 
+      });
     }
-  } catch (error) {
-    // אם הייתה שגיאה במסד הנתונים - נדפיס אותה ללוג, אבל לא נשבור את התמונה
-    console.error('Track error:', error);
-  } finally {
-    // 2. בסוף, תמיד נחזיר את התמונה, גם אם העדכון הצליח וגם אם נכשל
-    res.status(200).send(transparentPixel);
+
+    // הצלחה
+    return res.status(200).json({ 
+      success: true, 
+      message: "Row created successfully", 
+      data: data 
+    });
+
+  } catch (err) {
+    // שגיאה כללית בקוד
+    return res.status(500).json({ 
+      success: false, 
+      error: "Server Internal Error", 
+      message: err.message 
+    });
   }
 }
