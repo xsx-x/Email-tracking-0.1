@@ -8,32 +8,30 @@ const supabase = createClient(
 export default async function handler(req, res) {
   const { id } = req.query;
 
-  // הכנת הפיקסל (תמונה שקופה)
+  // שינוי ל-PNG: זהו פיקסל שקוף בפורמט PNG (יותר אמין מג'ימייל)
   const pixel = Buffer.from(
-    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
     'base64'
   );
 
-  // הגדרת כותרות (Headers)
-  res.setHeader('Content-Type', 'image/gif');
+  // כותרות חזקות למניעת שמירה בזיכרון
+  res.setHeader('Content-Type', 'image/png');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Expires', '0');
+  res.setHeader('Pragma', 'no-cache');
 
-  // אם אין מזהה, שלח תמונה וסיים
   if (!id) {
       return res.status(200).send(pixel);
   }
 
   try {
-    // --- ביצוע העדכון בטבלה (בדיוק כמו בגרסת הטקסט שעבדה) ---
-    
-    // 1. קריאה
+    // רישום הפתיחה במסד הנתונים
     const { data: current, error: findError } = await supabase
       .from('email_tracking')
       .select('open_count')
       .eq('tracking_id', id)
       .single();
 
-    // 2. כתיבה
     if (!findError && current) {
       await supabase
         .from('email_tracking')
@@ -43,11 +41,9 @@ export default async function handler(req, res) {
         })
         .eq('tracking_id', id);
     }
-    
   } catch (err) {
     console.error("Error:", err);
   }
 
-  // --- רק בסוף: שליחת התמונה לדפדפן ---
   return res.status(200).send(pixel);
 }
