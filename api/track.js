@@ -8,49 +8,46 @@ const supabase = createClient(
 export default async function handler(req, res) {
   const { id } = req.query;
 
-  // הכנת הפיקסל מראש
-  const pixel = Buffer.from(
-    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
-    'base64'
-  );
+  // אנחנו מכריחים את הדפדפן להראות טקסט
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
-  // הגדרת כותרות (Headers) כדי שהתמונה לא תיכנס לזיכרון
-  res.setHeader('Content-Type', 'image/gif');
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
-
-  // אם אין מזהה, סתם שולחים תמונה והולכים
   if (!id) {
-      return res.status(200).send(pixel);
+      return res.status(400).send("שגיאה: לא התקבל מזהה (Missing ID)");
   }
 
   try {
-    // --- שלב העדכון (קודם כל מבצעים את העבודה!) ---
-    
-    // 1. משיכת הנתונים הקיימים
-    const { data: current, error: findError } = await supabase
-      .from('email_tracking')
-      .select('open_count')
-      .eq('tracking_id', id)
-      .single();
+      // בדיקה 1: האם המזהה קיים בכלל?
+      const { data, error: findError } = await supabase
+        .from('email_tracking')
+        .select('*')
+        .eq('tracking_id', id)
+        .single();
 
-    // 2. אם מצאנו רשומה, מעדכנים אותה
-    if (!findError && current) {
-      await supabase
+      if (findError) {
+          return res.status(500).send("שגיאה בחיפוש (Select Error): " + JSON.stringify(findError));
+      }
+
+      if (!data) {
+          return res.status(404).send("לא נמצאה רשומה כזו (No record found). האם המזהה נכון?");
+      }
+
+      // בדיקה 2: האם מצליחים לעדכן?
+      const { error: updateError } = await supabase
         .from('email_tracking')
         .update({ 
-          open_count: (current.open_count || 0) + 1,
-          last_opened_at: new Date().toISOString()
+            open_count: (data.open_count || 0) + 1,
+            last_opened_at: new Date().toISOString()
         })
         .eq('tracking_id', id);
-    }
-    
-  } catch (err) {
-    // גם אם הייתה שגיאה במסד הנתונים, אנחנו מדפיסים אותה ללוג
-    // אבל לא עוצרים - כדי שהמשתמש בכל זאת יקבל תמונה ולא שגיאה
-    console.error("Track Error:", err);
-  }
 
-  // --- רק בסוף שולחים את התמונה ---
-  // ככה אנחנו בטוחים ש-Vercel לא סגר לנו את הברז באמצע
-  return res.status(200).send(pixel);
+      if (updateError) {
+          return res.status(500).send("שגיאה בעדכון (Update Error): " + JSON.stringify(updateError));
+      }
+
+      // הצלחה
+      return res.status(200).send("הצלחה! (Success) המספר עודכן ל: " + ((data.open_count || 0) + 1));
+
+  } catch (err) {
+      return res.status(500).send("קריסה כללית (System Error): " + err.message);
+  }
 }
