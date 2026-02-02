@@ -1,4 +1,3 @@
-// api/status.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -7,10 +6,22 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  // אפשר להוסיף כאן בדיקת CORS כדי שרק התוסף שלך יוכל לקרוא
-  res.setHeader('Access-Control-Allow-Origin', '*'); 
-  
-  const { ids } = req.query; // נקבל רשימה של IDs מופרדים בפסיק
+  // --- אישורי CORS ---
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  // -------------------
+
+  const { ids } = req.query;
   if (!ids) return res.json({});
 
   const idList = ids.split(',');
@@ -22,7 +33,6 @@ export default async function handler(req, res) {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // המרת המערך לאובייקט לנוחות הצד לקוח
   const result = {};
   data.forEach(row => {
       result[row.tracking_id] = row;
