@@ -8,46 +8,46 @@ const supabase = createClient(
 export default async function handler(req, res) {
   const { id } = req.query;
 
-  // אנחנו מכריחים את הדפדפן להראות טקסט
-  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  // הכנת הפיקסל (תמונה שקופה)
+  const pixel = Buffer.from(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+    'base64'
+  );
 
+  // הגדרת כותרות (Headers)
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+
+  // אם אין מזהה, שלח תמונה וסיים
   if (!id) {
-      return res.status(400).send("שגיאה: לא התקבל מזהה (Missing ID)");
+      return res.status(200).send(pixel);
   }
 
   try {
-      // בדיקה 1: האם המזהה קיים בכלל?
-      const { data, error: findError } = await supabase
-        .from('email_tracking')
-        .select('*')
-        .eq('tracking_id', id)
-        .single();
+    // --- ביצוע העדכון בטבלה (בדיוק כמו בגרסת הטקסט שעבדה) ---
+    
+    // 1. קריאה
+    const { data: current, error: findError } = await supabase
+      .from('email_tracking')
+      .select('open_count')
+      .eq('tracking_id', id)
+      .single();
 
-      if (findError) {
-          return res.status(500).send("שגיאה בחיפוש (Select Error): " + JSON.stringify(findError));
-      }
-
-      if (!data) {
-          return res.status(404).send("לא נמצאה רשומה כזו (No record found). האם המזהה נכון?");
-      }
-
-      // בדיקה 2: האם מצליחים לעדכן?
-      const { error: updateError } = await supabase
+    // 2. כתיבה
+    if (!findError && current) {
+      await supabase
         .from('email_tracking')
         .update({ 
-            open_count: (data.open_count || 0) + 1,
-            last_opened_at: new Date().toISOString()
+          open_count: (current.open_count || 0) + 1,
+          last_opened_at: new Date().toISOString()
         })
         .eq('tracking_id', id);
-
-      if (updateError) {
-          return res.status(500).send("שגיאה בעדכון (Update Error): " + JSON.stringify(updateError));
-      }
-
-      // הצלחה
-      return res.status(200).send("הצלחה! (Success) המספר עודכן ל: " + ((data.open_count || 0) + 1));
-
+    }
+    
   } catch (err) {
-      return res.status(500).send("קריסה כללית (System Error): " + err.message);
+    console.error("Error:", err);
   }
+
+  // --- רק בסוף: שליחת התמונה לדפדפן ---
+  return res.status(200).send(pixel);
 }
