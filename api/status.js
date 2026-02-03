@@ -1,57 +1,39 @@
-// api/status.js //
-
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
-function isValidUUID(uuid) {
-  const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return regex.test(uuid);
-}
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+    const { ids } = req.query;
+    if (!ids) return res.status(400).json({ error: 'Missing ids' });
 
-  const { id } = req.query;
+    const idList = ids.split(',');
 
-  if (!id || !isValidUUID(id)) {
-    return res.status(400).json({ 
-      success: false, 
-      error: "Invalid ID format" 
-    });
-  }
+    // שליפת הנתונים הכלליים
+    const { data: emails } = await supabase
+        .from('emails')
+        .select('id, opens_count, created_at') // וודא שהשמות תואמים לטבלה שלך
+        .in('id', idList);
 
-  try {
-    // הוספנו את 'opens_details' לשליפה
-    const { data, error } = await supabase
-      .from('email_tracking')
-      .select('open_count, last_opened_at, opens_details')
-      .eq('tracking_id', id)
-      .single();
+    // שליפת היסטוריית הפתיחות המפורטת לכל המיילים הללו
+    const { data: history } = await supabase
+        .from('email_opens')
+        .select('email_id, opened_at')
+        .in('email_id', idList)
+        .order('opened_at', { ascending: false });
 
-    if (error) {
-      return res.status(200).json({ 
-        success: true, 
-        count: 0, 
-        last_opened: null,
-        history: [] 
-      });
-    }
-
-    return res.status(200).json({ 
-      success: true, 
-      count: data.open_count,
-      last_opened: data.last_opened_at,
-      history: data.opens_details || [] // החזרת המערך המלא של ההיסטוריה
+    // איחוד המידע
+    const results = emails.map(email => {
+        const emailHistory = history
+            .filter(h => h.email_id === email.id)
+            .map(h => h.opened_at);
+        
+        return {
+            id: email.id,
+            opens: email.opens_count, // מספר הפתיחות
+            history: emailHistory,     // רשימת הזמנים המלאה
+            last_seen: emailHistory[0] || null
+        };
     });
 
-  } catch (err) {
-    console.error("Status API Error:", err);
-    return res.status(500).json({ success: false, error: "Internal Server Error" });
-  }
+    res.status(200).json(results);
 }
