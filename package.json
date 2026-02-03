@@ -1,7 +1,12 @@
 {
   "name": "email-tracker-backend",
   "version": "1.0.0",
+  "description": "Backend for Email Tracking Extension",
+  "main": "api/track.js",
   "dependencies": {
-    "@supabase/supabase-js": "^2.0.0"
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
